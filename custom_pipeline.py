@@ -1,64 +1,151 @@
 import gi
-
-gi.require_version("Gst", "1.0")
-from gi.repository import Gst
-
 import os
 import cv2
 import hailo
-import numpy as np
+import sys
 import setproctitle
 import serial
-
-import sys
-
+import numpy as np
 sys.path.append(os.path.abspath("hailo-rpi5-examples/basic_pipelines"))
+gi.require_version('Gst', '1.0')
+gi.require_version('GstRtspServer', '1.0')
+from gi.repository import Gst
+from gi.repository import GstRtspServer
+from hailo_rpi_common import app_callback_class
+from detection_pipeline import GStreamerDetectionApp
 
 
 from hailo_rpi_common import (
     get_default_parser,
     QUEUE,
-    get_caps_from_pad,
+    INFERENCE_PIPELINE,
+    INFERENCE_PIPELINE_WRAPPER,
+    USER_CALLBACK_PIPELINE,
+    DISPLAY_PIPELINE,
     GStreamerApp,
+    get_caps_from_pad,
     app_callback_class,
+    dummy_callback,
     display_user_data_frame,
     get_numpy_from_buffer, 
     disable_qos,
+    detect_hailo_arch,
 )
 
-def serialProcessing(detections):
-    """
-    Procesare pentru transmisii seriale bazate pe detec?ii.
+def SOURCE_PIPELINE(video_format='RGB', video_width=640, video_height=640, name='source'):
+    source_element = (
+        f'libcamerasrc name={name} ! '
+        f'video/x-raw, format=NV12, width={video_width}, height={video_height} ! '
+    )
+    source_pipeline = (
+        f'{source_element} '
+        f'{QUEUE(name=f"{name}_scale_q")} ! '
+        f'videoscale name={name}_videoscale n-threads=2 ! '
+        f'videoflip video-direction=180 ! '
+        f'{QUEUE(name=f"{name}_convert_q")} ! '
+        f'videoconvert n-threads=3 name={name}_convert qos=false ! '
+        f'video/x-raw, format={video_format}, pixel-aspect-ratio=1/1 ! '
+    )
 
-    Args:
-        detections (list): Lista de obiecte detectate.
-    """
+    return source_pipeline
+    
+def serialProcessing(detections):
     try:
         arduino = serial.Serial(port='/dev/ttyUSB0', baudrate=9600, timeout=0.1)
         if detections:
             arduino.write(b'R')
-            print("Detectie detectata\n")
-        else:
-            print("Nicio detectie\n")
+            print("Object detected \n")
     except FileNotFoundError:
-        print("Portul serial nu a fost gasit. Dispozitivul nu este conectat.")
+        print("Port not found\n")
     except Exception as e:
-        print(f"Eroare la utilizarea portului serial: {e}")
+        print(f"Port error: {e}")
 
-class UserAppCallbackClass(app_callback_class):
-    """
-    A user-defined callback class that extends the functionality of the base app_callback_class.
 
-    This class includes additional attributes for tracking the first previously detected but lost object.
+class CustomGStreamerDetectionApp(GStreamerApp):
+    def __init__(self, app_callback, user_data):
+        parser = get_default_parser()
+        parser.add_argument(
+            "--labels-json",
+            default=None,
+            help="Path to costume labels JSON file",
+        )
+        parser.add_argument(
+            "--headless",
+            action="store_true",
+            help="Run the application in headless mode (no display).")
+        args = parser.parse_args()
+        # Call the parent class constructor
+        super().__init__(args, user_data)
+        # Additional initialization code can be added here
+        # Set Hailo parameters these parameters should be set based on the model used
+        self.batch_size = 2
+        self.network_width = 640
+        self.network_height = 640
+        self.network_format = "RGB"
+        nms_score_threshold = 0.3
+        nms_iou_threshold = 0.45
+        # Determine the architecture if not specified
+        if args.arch is None:
+            detected_arch = detect_hailo_arch()
+            if detected_arch is None:
+                raise ValueError("Could not auto-detect Hailo architecture. Please specify --arch manually.")
+            self.arch = detected_arch
+            print(f"Auto-detected Hailo architecture: {self.arch}")
+        else:
+            self.arch = args.arch
 
-    Attributes:
-        last_bbox (hailo.HailoBBox): Stores the last bounding box detected.
-        prev_pts (numpy.ndarray): Stores the previous points detected.
-        last_label (str): Stores the last label assigned.
-        prev_roi (numpy.ndarray): Stores the previous region of interest.
-        orb (cv2.ORB): An instance of the ORB detector for feature detection.
-    """
+        if args.hef_path is not None:
+            self.hef_path = args.hef_path
+        # Set the HEF file path based on the arch
+        elif self.arch == "hailo8":
+            self.hef_path = os.path.join(self.current_path, '../resources/yolov8m.hef')
+        else:  # hailo8l
+            self.hef_path = os.path.join(self.current_path, '../resources/yolov8s_h8l.hef')
 
+        # Set the post-processing shared object file
+        self.post_process_so = os.path.join(self.current_path, '../resources/libyolo_hailortpp_postprocess.so')
+
+        # User-defined label JSON file
+        self.labels_json = args.labels_json
+
+        self.app_callback = app_callback
+
+        self.thresholds_str = (
+            f"nms-score-threshold={nms_score_threshold} "
+            f"nms-iou-threshold={nms_iou_threshold} "
+            f"output-format-type=HAILO_FORMAT_TYPE_FLOAT32"
+        )
+
+        # Set the process title
+        setproctitle.setproctitle("Hailo Detection App")
+        self.headless = args.headless
+        if self.headless:
+            self.video_sink = "fakesink"
+        else:
+            self.video_sink = "autovideosink"
+        self.options_menu.show_fps = not self.headless
+        self.create_pipeline()
+
+    def get_pipeline_string(self):
+        source_pipeline = SOURCE_PIPELINE()
+        detection_pipeline = INFERENCE_PIPELINE(
+            hef_path=self.hef_path,
+            post_process_so=self.post_process_so,
+            batch_size=self.batch_size,
+            config_json=self.labels_json,
+            additional_params=self.thresholds_str)
+        user_callback_pipeline = USER_CALLBACK_PIPELINE()
+        display_pipeline = DISPLAY_PIPELINE(video_sink=self.video_sink, sync=self.sync, show_fps=self.show_fps)
+        pipeline_string = (
+            f'{source_pipeline} '
+            f'{detection_pipeline} ! '
+            f'{user_callback_pipeline} ! '
+            f'{display_pipeline}'
+        )
+        return pipeline_string
+
+
+class user_app_callback_class(app_callback_class):
     def __init__(self):
         super().__init__()
         self.last_bbox = None
@@ -67,9 +154,6 @@ class UserAppCallbackClass(app_callback_class):
         self.prev_roi = None
         # Initialize ORB (Oriented FAST and Rotated BRIEF) detector
         self.orb = cv2.ORB_create()
-
-
-
 
 def update_detection(user_data, detection, frame, frame_width, frame_height):
     """
@@ -200,7 +284,6 @@ def get_bbox_coords(bbox, width, height):
         )
     ]
 
-
 def app_callback(pad, info, user_data):
     """
     Callback function for processing video frames in the GStreamer pipeline.
@@ -253,136 +336,8 @@ def app_callback(pad, info, user_data):
     serialProcessing(detections)
     return Gst.PadProbeReturn.OK
 
-
-class GStreamerTrackingApp(GStreamerApp):
-    """
-    A GStreamer application for instance segmentation using YOLOv5 and tracking object.
-
-    Attributes:
-        batch_size (int): The batch size for processing frames.
-        network_width (int): The width of the input expected by the neural network.
-        network_height (int): The height of the input expected by the neural network.
-        network_format (str): The color format of the input (e.g., "RGB").
-        default_postprocess_so (str): Path to the default post-processing shared object file.
-        source_type (str): The type of input source (e.g., "rpi" for Raspberry Pi).
-        default_network_name (str): The default name of the neural network.
-        hef_path (str): Path to the Hailo Executable Format (HEF) file.
-        app_callback: Callback function for the application.
-        processing_path (str): Path to the custom processing script.
-
-    Methods:
-        get_pipeline_string(): Returns the GStreamer pipeline string for this application.
-    """
-
-    def __init__(self, args, user_data):
-        super().__init__(args, user_data)
-
-        self.batch_size = 2
-        self.network_width = 640
-        self.network_height = 640
-
-        self.network_format = "RGB"
-        self.default_postprocess_so = os.path.join(
-            self.postprocess_dir, "libyolov5seg_post.so"
-        )
-        self.source_type = "rpi"
-        self.saving = args.save
-        self.default_network_name = "yolov5seg"
-        self.hef_path = os.path.join(
-            self.current_path, "../resources/yolov5n_seg_h8l_mz.hef"
-        )
-
-        self.app_callback = app_callback
-        self.processing_path = os.path.join(
-            self.current_path, "../post_processing/custom_processing.py"
-        )
-        setproctitle.setproctitle(" detection and tracking app")
-        self.headless = args.headless
-        if self.headless:
-            self.video_sink = "fakesink"
-        else:
-            self.video_sink = "autovideosink"
-        self.options_menu.show_fps = not self.headless
-
-        self.create_pipeline()
-
-    def get_pipeline_string(self):
-        """
-        Generates and returns the GStreamer pipeline string for instance segmentation.
-
-        This method constructs a complex GStreamer pipeline string that defines the
-        processing steps for instance segmentation. The pipeline includes elements for:
-        - Video source capture and initial processing
-        - t. for splitting the video stream
-        - Hailo-specific elements for neural network inference
-        - Post-processing and filtering
-        - Overlay of segmentation results
-        - Display of the processed video with FPS information
-
-        Returns:
-            str: A complete GStreamer pipeline string ready for execution.
-        """
-
-        source_element = "libcamerasrc name=src_0 auto-focus-mode=AfModeManual ! "
-        source_element += (
-            f"video/x-raw, format={self.network_format}, width=1536, height=864 ! "
-        )
-        source_element += QUEUE("queue_src_scale")
-        source_element += "videoscale ! "
-        source_element += f"video/x-raw, format={self.network_format}, width={self.network_width}, height={self.network_height}, framerate=30/1 ! "
-        source_element += "videoflip video-direction=180 ! "
-        source_element += QUEUE("queue_scale")
-        source_element += " videoscale n-threads=2 ! "
-        source_element += QUEUE("queue_src_convert")
-        source_element += " videoconvert n-threads=3 name=src_convert qos=false ! "
-        source_element += f"video/x-raw, format={self.network_format}, width={self.network_width}, height={self.network_height}, pixel-aspect-ratio=1/1 ! "
-
-        pipeline_string = (
-            "hailomuxer name=hmux "
-            + source_element
-            + "tee name=t ! "
-            + QUEUE("bypass_queue", max_size_buffers=20)
-            + "hmux.sink_0 "
-            + "t. ! "
-            + QUEUE("queue_hailonet")
-            + "videoconvert n-threads=3 ! "
-            + f"hailonet hef-path={self.hef_path} batch-size={self.batch_size} force-writable=true ! "
-            + f"hailofilter function-name={self.default_network_name} so-path={self.default_postprocess_so} qos=false ! "
-            + QUEUE("queue_hmuc")
-            + " hmux.sink_1 "
-            + "hmux. ! "
-            + QUEUE("queue_user_callback")
-            + "identity name=identity_callback ! "
-            + QUEUE("queue_hailooverlay")
-            + "hailooverlay ! "
-            + "tee name=post_process_tee ! " # Add a tee element to use post-processed frames in saving procedure 
-            + QUEUE("queue_videoconvert")
-            + "videoconvert n-threads=3 qos=false ! "
-            + QUEUE("queue_hailo_display")
-            + f"fpsdisplaysink video-sink={self.video_sink} name=hailo_display sync={self.sync} text-overlay={self.options_menu.show_fps} signal-fps-measurements=true "
-        )
-        # implementation of saving the video
-        if self.saving is not None:
-           pipeline_string += (
-               f"post_process_tee. ! {QUEUE('queue_save')} "
-               "videoconvert ! "
-               "x264enc bitrate=30000 speed-preset=ultrafast tune=zerolatency ! "
-               "matroskamux ! "
-               f"filesink location={self.saving} "
-           )
-
-        return pipeline_string
-
-
-
-user_data = UserAppCallbackClass()
+user_data = user_app_callback_class()
 
 if __name__ == "__main__":
-    parser = get_default_parser()
-    # add an argument to the parser to enable saving video and specify a directory and name of the file in the terminal
-    parser.add_argument("--save", type=str, default="None", help="Directory to save video to file (default: not saving)")
-    parser.add_argument("--headless", action="store_true",help="Run the application in headless mode (no display).")
-
-    args = parser.parse_args()
-    app = GStreamerTrackingApp(args, user_data)
+    app = CustomGStreamerDetectionApp(app_callback, user_data)
     app.run()
