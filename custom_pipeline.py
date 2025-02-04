@@ -11,25 +11,31 @@ gi.require_version('Gst', '1.0')
 gi.require_version('GstRtspServer', '1.0')
 from gi.repository import Gst
 from gi.repository import GstRtspServer
-from hailo_rpi_common import app_callback_class
-from detection_pipeline import GStreamerDetectionApp
+from hailo_apps_infra.hailo_rpi_common import app_callback_class
+from hailo_apps_infra.detection_pipeline import GStreamerDetectionApp
 
 
-from hailo_rpi_common import (
+from hailo_apps_infra.hailo_rpi_common import (
     get_default_parser,
+    get_caps_from_pad,
+    get_numpy_from_buffer, 
+    detect_hailo_arch,
+)
+from hailo_apps_infra.gstreamer_helper_pipelines import(
     QUEUE,
+    SOURCE_PIPELINE,
     INFERENCE_PIPELINE,
     INFERENCE_PIPELINE_WRAPPER,
+    TRACKER_PIPELINE,
     USER_CALLBACK_PIPELINE,
     DISPLAY_PIPELINE,
+)
+from hailo_apps_infra.gstreamer_app import (
     GStreamerApp,
-    get_caps_from_pad,
     app_callback_class,
-    dummy_callback,
-    display_user_data_frame,
-    get_numpy_from_buffer, 
     disable_qos,
-    detect_hailo_arch,
+    dummy_callback,
+    display_user_data_frame
 )
 
 def SOURCE_PIPELINE(video_format='RGB', video_width=640, video_height=640, name='source'):
