@@ -6,16 +6,14 @@ import sys
 import user_app_callback
 sys.path.append(os.path.abspath("hailo-rpi5-examples/basic_pipelines"))
 gi.require_version('Gst', '1.0')
-gi.require_version('GstRtspServer', '1.0')
 from gi.repository import Gst
-from gi.repository import GstRtspServer
 from hailo_apps_infra.hailo_rpi_common import get_numpy_from_buffer
 from custom_streamer import CustomGStreamerDetectionApp
 
 from utilities import (
     get_frame_info,
-    serialProcessing,
-    update_detection,track_object
+    update_detection,
+    track_object
 )
 
 
@@ -62,13 +60,12 @@ def app_callback(pad, info, user_data):
     if detections:
         update_detection(
             user_data, detections[0], current_gray, frame_width, frame_height
-        )
+        )    
     # If no detections are found but a previous ROI exists in user_data, track the object using
     # the previous ROI, current grayscale frame, and frame dimensions
     elif user_data.prev_roi is not None:
         track_object(user_data, current_gray, roi, frame_width, frame_height)
-    # Enable serial processing
-    serialProcessing(detections)
+   
     return Gst.PadProbeReturn.OK
 
 user_data = user_app_callback.user_app_callback()
