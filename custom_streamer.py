@@ -32,9 +32,6 @@ class CustomGStreamerDetectionApp(GStreamerApp):
         # Additional initialization code can be added here
         # Set Hailo parameters these parameters should be set based on the model used
         self.batch_size = 2
-        self.network_width = 640
-        self.network_height = 640
-        self.network_format = "RGB"
         nms_score_threshold = 0.8
         nms_iou_threshold = 0.9
         # Determine the architecture if not specified
