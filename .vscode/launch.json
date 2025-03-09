@@ -4,14 +4,20 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
         {
-            "name": "Hailo Debug",
+            "name": "Streaming Hailo Debug",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/custom_pipeline.py",
-            "preLaunchTask": "initializeHailo",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "env": {
+                "DISPLAY": ":0",
+            },
+            "args": [
+                "--stream-address",
+                "--labels-json= ${workspaceFolder}/traffic_sign_detection_model_yolov8.json",
+                "--hef-path= ${workspaceFolder}/traffic_sign_detection_model_yolov8.hef",
+            ]
         },
         {
             "name": "Headless Hailo Debug",
@@ -19,10 +25,28 @@
             "request": "launch",
             "program": "${workspaceFolder}/custom_pipeline.py",
             "console": "integratedTerminal",
-            "preLaunchTask": "initializeHailo",
             "args": [
-                "--headless"
+                "--headless",
+                "--labels-json= ${workspaceFolder}/traffic_sign_detection_model_yolov8.json",
+                "--hef-path= ${workspaceFolder}/traffic_sign_detection_model_yolov8.hef"
             ]
+        },
+        {
+            "name": "Hailo Debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/custom_pipeline.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Camera Test",
+            "type": "debugpy",
+            "request": "launch",
+            "env": {
+                "DISPLAY": ":0",
+            },
+            "program": "${workspaceFolder}/cameraTest.py",
+            "console": "integratedTerminal"
         }
     ]
 }

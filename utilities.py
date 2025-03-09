@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 from hailo_apps_infra.hailo_rpi_common import get_caps_from_pad
 
+
 def update_detection(user_data, detection, frame, frame_width, frame_height):
     """
     Update the detection information in the user data.
@@ -13,7 +14,7 @@ def update_detection(user_data, detection, frame, frame_width, frame_height):
 
     Args:
         user_data (UserAppCallbackClass): An instance of the UserAppCallbackClass
-                                             where the detection information will be stored.
+        where the detection information will be stored.
         detection (Detection): The detection object containing bounding box and label information.
         frame (numpy.ndarray): The current frame from which the ROI will be extracted.
         frame_width (int): The width of the frame.
@@ -84,28 +85,6 @@ def track_object(user_data, frame, roi, frame_width, frame_height):
 
     user_data.prev_pts = good_new.reshape(-1, 1, 2)  # Update previous points
     user_data.prev_roi = roi_curr
-
-    # Determine the object's center
-    obj_center_x = (x_min + x_max) / 2
-    frame_center_x = frame_width / 2
-    tolerance = frame_width * 0.1  # 10% tolerance
-    if(user_data.arduino.is_open == False):
-        user_data.arduino.open()
-    try:
-        if obj_center_x < frame_center_x - tolerance:
-            user_data.arduino.write(b'L')
-            print("Left\n")
-        elif obj_center_x > frame_center_x + tolerance:
-            user_data.arduino.write(b'R')
-            print("Right\n")
-        else:
-            user_data.arduino.write(b'S')
-            print("Stop\n")
-        user_data.arduino.flush()
-    except FileNotFoundError:
-        print("Port not found\n")
-    except Exception as e:
-        print(f"Port error: {e}")
 
 
 def get_frame_info(pad, info):
