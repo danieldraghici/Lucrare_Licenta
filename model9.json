@@ -1,0 +1,16 @@
+{
+    "iou_threshold":0.6,
+    "detection_threshold": 0.85,
+    "output_activation":"none",
+    "label_offset":1,
+    "max_boxes": 200,
+    "labels": [
+        "unlabeled",
+        "accesul_interzis",
+        "inainte_sau_la_dreapta",
+        "inainte_sau_la_stanga",
+        "la_dreapta",
+        "la_stanga",
+        "stop"
+    ]
+}

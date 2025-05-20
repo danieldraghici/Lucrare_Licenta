@@ -6,17 +6,18 @@
     "configurations": [
         {
             "name": "Streaming Hailo Debug",
+            "name": "Streaming Hailo Debug",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/custom_pipeline.py",
+            "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
             "env": {
                 "DISPLAY": ":0",
             },
             "args": [
                 "--stream-address",
-                "--labels-json= ${workspaceFolder}/traffic_sign_detection_model_yolov8.json",
-                "--hef-path= ${workspaceFolder}/traffic_sign_detection_model_yolov8.hef",
+                "--labels-json= ${workspaceFolder}/model9.json",
+                "--hef-path= ${workspaceFolder}/model9.hef",
             ]
         },
         {
@@ -25,6 +26,9 @@
             "request": "launch",
             "program": "${workspaceFolder}/custom_pipeline.py",
             "console": "integratedTerminal",
+            "env": {
+                "DISPLAY": ":0",
+            },
             "args": [
                 "--headless",
                 "--labels-json= ${workspaceFolder}/traffic_sign_detection_model_yolov8.json",
@@ -35,8 +39,28 @@
             "name": "Hailo Debug",
             "type": "debugpy",
             "request": "launch",
+            "env": {
+                "DISPLAY": ":0",
+            },
             "program": "${workspaceFolder}/custom_pipeline.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Custom pipeline test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/custom_pipeline.py",
+            "console": "integratedTerminal",
+            "env": {
+                "DISPLAY": ":0",
+            },
+            "justMyCode":false,
+            "args": [
+                "--stream-address",
+                "--labels-json= ${workspaceFolder}/model9.json",
+                "--hef-path= ${workspaceFolder}/model9.hef",
+            ],
+            "subProcess": true
         },
         {
             "name": "Camera Test",
