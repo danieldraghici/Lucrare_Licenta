@@ -28,11 +28,27 @@ source setup_env.sh
 cd ..
 ```
 
-To use the custom pipeline, simply run the python file but only after it's activate
+#### Python interpreter
 
+Before running the project, make sure your IDE (e.g., VSCode or PyCharm) uses the Python interpreter from the virtual environment created during setup.
+Select the following interpreter path:
 ```bash
-python custom_pipeline.py
+hailo-rpi5-examples/venv_hailo_rpi5_examples/bin/python3.11
 ```
+
+This ensures compatibility with the dependencies installed during setup.
+
+## Running the project
+
+### Running the autonomous vehicle pipeline
+
+To use the custom pipeline, simply run the active debug configuration, after connecting to the RaspberryPi via SSH in VSCode
+
+### Running the dashboard
+
+The dashboard needs to be running on the host PC
+
+The ports used in the pipeline (5000,4956) need to be exposed on the Raspberry Pi with VSCode
 
 ## Possible issues
 
