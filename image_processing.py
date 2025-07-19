@@ -27,6 +27,16 @@ def prepare_frame(current_frame, user_data):
     current_frame = cv2.filter2D(current_frame, -1, sharpen_kernel)
     return current_frame
 
+def calculate_error_for_pid(user_data, error):
+    user_data.current_error = error
+    
+    abs_error = abs(error)
+    direction = DIRECTION_FORWARD
+    
+    if abs_error > pipeline_server.movement_tolerance * 1.5:
+        direction = DIRECTION_LEFT if error < 0 else DIRECTION_RIGHT
+    
+    return error, direction
 
 def extract_blackline(user_data,current_frame):
     thresh=cv2.inRange(current_frame, (0, 0, 0), (pipeline_server.black_threshold, pipeline_server.black_threshold, pipeline_server.black_threshold))
@@ -38,17 +48,11 @@ def calculate_error(user_data,error):
     abs_error = abs(error)
     direction = DIRECTION_FORWARD
     
-    # Calculate PID output
-    pid_output = user_data.pid.update(error)
-    # Determine direction based on error sign
-    if abs_error > pipeline_server.movement_tolerance:
-        direction = DIRECTION_LEFT if error < 0 else DIRECTION_RIGHT
-    else:
-        # Reset integral when within tolerance
-        user_data.pid.reset()
-        pid_output = 0
-        
-    return pid_output, direction
+    if error < -pipeline_server.movement_tolerance:
+        direction = DIRECTION_LEFT
+    elif error > pipeline_server.movement_tolerance:
+        direction = DIRECTION_RIGHT
+    return 0, direction
 
 def extract_intersection(c, current_frame, cx, cy):
     approx = cv2.approxPolyDP(c, 0.02 * cv2.arcLength(c, True), True)
@@ -63,7 +67,7 @@ def extract_intersection(c, current_frame, cx, cy):
         (cx - 50, cy - 30),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
-        (0, 0, 255),
+        (255, 0, 0),
         2,
     )
     return approx, current_frame
@@ -93,7 +97,7 @@ def extract_line_angle(c):
         angle -= 180
     return angle
 
-def process_frame(current_frame, detections, user_data, mode=0):
+def process_frame(current_frame, detections, user_data, mode=0,send_sign_callback=None):
     try:
         error = None
         dynamic_modifier = 0
@@ -102,11 +106,13 @@ def process_frame(current_frame, detections, user_data, mode=0):
         approx = None
         current_frame = prepare_frame(current_frame, user_data)
         blackline = extract_blackline(user_data,current_frame)
-        # Always true when the car stars moving after encountering a sign in an intersection, otherwise false
+        if not hasattr(user_data, 'current_error'):
+            user_data.current_error = 0
         if user_data.pending_direction:
             if user_data.forward_frames_ > 0:
                 user_data.forward_frames_ -= 1
                 print(f"Forward frames left: {user_data.forward_frames_}")
+                user_data.current_error = 0
                 return DIRECTION_FORWARD, current_frame, blackline, dynamic_modifier
             if user_data.direction_frames > 0:
                 if user_data.stop_frames > 0:
@@ -117,9 +123,6 @@ def process_frame(current_frame, detections, user_data, mode=0):
                 user_data.direction_frames -= 1
                 return user_data.pending_direction, current_frame, blackline, dynamic_modifier
             elif user_data.direction_frames == 0 or user_data.forward_frames_ % 2==0:
-                if not user_data.debug2:
-                            cv2.imwrite("adjust2.jpg", current_frame)
-                            user_data.debug2 = True
                 line_info = extract_line_center(blackline)
                 print(f"Moved enough frames in pending direction, aligning now....{error}",user_data.pending_direction)
                 if line_info is None:
@@ -130,8 +133,10 @@ def process_frame(current_frame, detections, user_data, mode=0):
                     return direction, current_frame, blackline, dynamic_modifier
                 c, cx, cy = line_info
                 angle = extract_line_angle(c)
+                print(cx,cy)
                 error = cx - 320
-                dynamic_modifier, direction = calculate_error(user_data, error)
+                user_data.current_error = error
+                dynamic_modifier, direction = calculate_error_for_pid(user_data, error)
                 threshold=50
                 if error is not None and error != 0:
                     print(f"error:{error}")
@@ -144,6 +149,7 @@ def process_frame(current_frame, detections, user_data, mode=0):
                         user_data.direction_frames = (
                             user_data.initial_direction_frames
                         )
+                        user_data.current_error = 0
                         direction = DIRECTION_FORWARD
                 elif user_data.pending_direction!=None:
                         print("Aligning with pending direction:", user_data.pending_direction)
@@ -151,11 +157,14 @@ def process_frame(current_frame, detections, user_data, mode=0):
                         print("direction:",direction)
                 return direction, current_frame, blackline, dynamic_modifier
             
-        # If the car is not moving in an intersection, process the frame normally
         if blackline is None:
             return DIRECTION_STOP, current_frame, blackline, dynamic_modifier
-        # If the car is in manual mode, return without processing
         if mode == 1:
+            line_info = extract_line_center(blackline)
+            if line_info is None:
+                return DIRECTION_STOP, current_frame, blackline, dynamic_modifier
+            c, cx, cy = line_info
+            approx, current_frame = extract_intersection(c, current_frame, cx, cy)
             return None, current_frame, blackline, None
         if blackline is None:
                 return DIRECTION_STOP, current_frame, blackline, dynamic_modifier
@@ -164,19 +173,18 @@ def process_frame(current_frame, detections, user_data, mode=0):
             return DIRECTION_STOP, current_frame, blackline, dynamic_modifier
         c, cx, cy = line_info
         angle = extract_line_angle(c)
+        cv2.circle(current_frame, (cx, cy), 5, (0, 255, 0), -1)
         error = cx - 320
-        dynamic_modifier, direction = calculate_error(user_data, error)
+        print(f"cx: {cx}, cy: {cy}, error: {error}")
+        dynamic_modifier, direction = calculate_error_for_pid(user_data, error)
         approx, current_frame = extract_intersection(c, current_frame, cx, cy)
         if approx is not None and len(approx) >= 6:
             if user_data.intersection_count == 0:
                 user_data.intersection_count += 1
                 print("Intersection detected")
             user_data.can_process_intersection = True
-            # Calculate lower portion threshold (bottom 30% of frame)
         frame_height = current_frame.shape[0]
-        lower_threshold = frame_height * pipeline_server.height_modifier  # 448px for 640px height
-        # lower_threshold = 150
-        # Filter detections in lower portion
+        lower_threshold = frame_height * pipeline_server.height_modifier
         valid_detections = []
         for det in detections:
             bbox = det.get_bbox()
@@ -185,17 +193,21 @@ def process_frame(current_frame, detections, user_data, mode=0):
             if y_center < lower_threshold:
                 user_data.intersection_count += 1
                 valid_detections.append(det.get_label())
-            # Determine action based on detected signs
-        action, _ = determine_action(valid_detections)
+        action = determine_action(valid_detections)
         if action:
             user_data.sign_detected = True
             print("Sign detected")
+            if user_data.can_process_intersection and send_sign_callback:
+                try:
+                    send_sign_callback(action)
+                    print(f"Sent sign detection to dashboard: {action}")
+                except Exception as e:
+                    print(f"Failed to send sign to dashboard: {e}")
             sign_direction = COMMAND_MAP[action]
             if sign_direction == DIRECTION_STOP:
                 direction = DIRECTION_STOP
                 user_data.pending_direction = None
             else:
-                # Set pending direction and initialize forward frames
                 user_data.found_direction = sign_direction
         elif user_data.sign_detected:
             user_data.sign_detected = False
@@ -209,7 +221,6 @@ def process_frame(current_frame, detections, user_data, mode=0):
                 pipeline_server.stop_frames
             )
             user_data.can_process_intersection = False
-        # Show line indicating direction
         if pipeline_server.show_debug:
             show_next_direction(current_frame, direction, arrow_color)
 
@@ -217,6 +228,7 @@ def process_frame(current_frame, detections, user_data, mode=0):
     except Exception as e:
         print(f"Error processing frame: {e}")
         traceback.print_exc()
+        user_data.current_error = 0
         return DIRECTION_STOP, current_frame, None, 0
 
 def show_next_direction(current_frame, direction, arrow_color=(0, 255, 0)):

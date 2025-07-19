@@ -12,14 +12,6 @@ class PIDController:
         self.prev_error = 0
         self.integral = 0
         
-    def update(self, error, dt=1.0):
-        derivative = (error - self.prev_error) / dt
-        self.integral += error * dt
-        self.integral = max(min(self.integral, self.max_integral), -self.max_integral)
-        output = (self.Kp * error) + (self.Ki * self.integral) + (self.Kd * derivative)
-        output = max(min(output, self.output_limit), -self.output_limit)
-        self.prev_error = error
-        return output
     def set_parameters(self, Kp=None, Ki=None, Kd=None):
         if Kp is not None:
             self.Kp = Kp

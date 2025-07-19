@@ -5,7 +5,7 @@ import serial
 import threading
 import threading
 from hailo_apps_infra.hailo_rpi_common import app_callback_class
-from constants import DIRECTION_FORWARD, DIRECTION_LEFT
+from constants import DIRECTION_STOP
 import time
 from pid import PIDController
 from server import pipeline_server
@@ -50,11 +50,19 @@ class user_app_callback(app_callback_class):
         self.right_speed=0
         self.found_direction=False
         self.sign_detected=False
+        self.last_direction=DIRECTION_STOP
         self.can_process_intersection=True
         self.debug1=False
         self.debug2=False
+        self.current_error = 0
         self.pid = PIDController(Kp=pipeline_server.Kp, Ki=pipeline_server.Ki, Kd=pipeline_server.Kd, max_integral=pipeline_server.max_integral, output_limit=pipeline_server.output_limit)
-        # self.is_moving_forward = False
+        
+        self.processed_frame = None
+        self.blackline = None
+        self.current_direction = DIRECTION_STOP
+        self.frame_timestamp = 0
+        self.processing_time = 0
+        
     def update_control_state(self, state):
             self.control_state = state
             

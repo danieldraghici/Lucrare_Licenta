@@ -1,5 +1,5 @@
 {
     "python.analysis.extraPaths": [
-        "./hailo-rpi5-examples/basic_pipelines"
+        "./hailo-rpi5-examples/basic_pipelines",
     ]
 }

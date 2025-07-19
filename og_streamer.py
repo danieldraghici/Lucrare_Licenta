@@ -41,17 +41,14 @@ class CustomGStreamerDetectionApp(GStreamerApp):
             action="store_true",
             help="Streams address of the video source.",
         )
+        
         args = parser.parse_args()
-        # Call the parent class constructor
-        super().__init__(args, user_data)
-        # Additional initialization code can be added here
-        # Set Hailo parameters these parameters should be set based on the model used
+        super().__init__(parser, user_data)
         self.batch_size = 2
-        self.video_width=640
-        self.video_height=640
+        self.video_width=800
+        self.video_height=600
         nms_score_threshold = 0.5
         nms_iou_threshold = 0.5
-        # Determine the architecture if not specified
         if args.arch is None:
             detected_arch = detect_hailo_arch()
             if detected_arch is None:
@@ -65,31 +62,25 @@ class CustomGStreamerDetectionApp(GStreamerApp):
 
         if args.hef_path is not None:
             self.hef_path = args.hef_path
-        # Set the HEF file path based on the arch
         elif self.arch == "hailo8":
             self.hef_path = os.path.join(self.current_path, "../resources/yolov8m.hef")
-        else:  # hailo8l
+        else:
             self.hef_path = os.path.join(
                 self.current_path, "../resources/yolov8s_h8l.hef"
             )
-
-        # Set the post-processing shared object file
         self.post_process_so = os.path.join(
             self.current_path, "../resources/libyolo_hailortpp_postprocess.so"
         )
         self.options_menu.use_frame = True
         self.source_type="rpi"
-        # User-defined label JSON file
         self.labels_json = args.labels_json
         print(f"Labels JSON: {self.labels_json}")
         self.app_callback = app_callback
-
         self.thresholds_str = (
             f"nms-score-threshold={nms_score_threshold} "
             f"nms-iou-threshold={nms_iou_threshold} "
             f"output-format-type=HAILO_FORMAT_TYPE_FLOAT32"
         )
-
         setproctitle.setproctitle("Hailo Detection App")
         self.headless = args.headless
         self.stream_address = args.stream_address
@@ -102,7 +93,7 @@ class CustomGStreamerDetectionApp(GStreamerApp):
         self.create_pipeline()
         self.stream_pipeline = Gst.parse_launch(
             f"appsrc name=stream_src format=time is-live=true leaky-type=downstream max-buffers=1 "
-            f"caps=video/x-raw,format=RGB,width=640,height=640,framerate=30/1 ! videorate ! "
+            f"caps=video/x-raw,format=RGB,width=800,height=600,framerate=30/1 ! videorate ! "
             f"videoconvert ! {OVERLAY_PIPELINE(name='hailo_overlay')} ! "
             f"jpegenc ! tcpserversink port=4956 sync=false async=false"
         )
@@ -124,28 +115,14 @@ class CustomGStreamerDetectionApp(GStreamerApp):
                 return Gst.FlowReturn.ERROR
             frame = np.frombuffer(mapinfo.data, dtype=np.uint8)
             frame = frame.reshape((height, width, 3))
-            frame_copy = cv2.resize(frame, (640, 640))
+            frame_copy = cv2.resize(frame, (800, 600))
             adjusted_frame = cv2.addWeighted(frame_copy, pipeline_server.contrast, np.zeros(frame_copy.shape, frame_copy.dtype), 0, pipeline_server.brightness) 
-            if pipeline_server.show_debug:
-                with self.user_data.lock:
-                    _, processed_frame, roi_thresh,_ = process_frame(
-                        adjusted_frame.copy(), self.user_data.detections, self.user_data,mode=1
-                    )
-                if roi_thresh is None:
-                    return Gst.FlowReturn.OK
-                roi_color = (0, 0, 255)
-                alpha = 0.6
-
-                if roi_thresh.shape[:2] != processed_frame.shape[:2]:
-                    roi_thresh_resized = cv2.resize(roi_thresh, (processed_frame.shape[1], processed_frame.shape[0]))
-                else:
-                    roi_thresh_resized = roi_thresh
-
-                mask_indices = roi_thresh_resized > 0
-                overlay = processed_frame.copy()
-                overlay[mask_indices] = roi_color
-                cv2.addWeighted(overlay, alpha, processed_frame, 1 - alpha, 0, processed_frame)
-                
+            
+            # Always rotate the frame and prepare for drawing detections
+            display_frame = cv2.rotate(adjusted_frame, cv2.ROTATE_180)
+            
+            # Always draw detection bounding boxes regardless of debug mode
+            with self.user_data.lock:
                 for det in self.user_data.detections:
                     bbox = det.get_bbox()
                     x_min = int(bbox.xmin() * width)
@@ -156,16 +133,22 @@ class CustomGStreamerDetectionApp(GStreamerApp):
                     x_min_rot, y_min_rot = width - x_max, height - y_max
                     x_max_rot, y_max_rot = width - x_min, height - y_min
 
-                    sx, sy = 640 / width, 640 / height
+                    sx, sy = 800 / width, 600 / height  # Use actual display frame dimensions
                     x0 = int(x_min_rot * sx)
                     y0 = int(y_min_rot * sy)
                     x1 = int(x_max_rot * sx)
                     y1 = int(y_max_rot * sy)
 
-                    cv2.rectangle(processed_frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
+                    # Ensure coordinates are within frame bounds
+                    x0 = max(0, min(x0, 799))
+                    y0 = max(0, min(y0, 599))
+                    x1 = max(0, min(x1, 799))
+                    y1 = max(0, min(y1, 599))
+
+                    cv2.rectangle(display_frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
                     label = f"{det.get_label()}:{det.get_confidence():.2f}"
                     cv2.putText(
-                        processed_frame,
+                        display_frame,
                         label,
                         (x0, y0 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -173,15 +156,33 @@ class CustomGStreamerDetectionApp(GStreamerApp):
                         (0, 255, 0),
                         1,
                     )
-                if self.stream_pipeline.get_state(0)[1] != Gst.State.PLAYING:
-                    return Gst.FlowReturn.OK
-                gst_buf = Gst.Buffer.new_wrapped(processed_frame.tobytes())
-                processed_frame=cv2.Laplacian(processed_frame, cv2.CV_64F)
-                self.stream_src.emit("push-buffer", gst_buf)
-            else:
-                adjusted_frame = cv2.rotate(adjusted_frame, cv2.ROTATE_180)
-                gst_buf = Gst.Buffer.new_wrapped(adjusted_frame.tobytes())
-                self.stream_src.emit("push-buffer", gst_buf)
+            
+            # Add debug overlays only when debug mode is enabled
+            if pipeline_server.show_debug:
+                with self.user_data.lock:
+                    _, display_frame, roi_thresh, _ = process_frame(
+                        adjusted_frame.copy(), self.user_data.detections, self.user_data, mode=1
+                    )
+                
+                if roi_thresh is not None:
+                    roi_color = (0, 0, 255)
+                    alpha = 0.6
+
+                    if roi_thresh.shape[:2] != display_frame.shape[:2]:
+                        roi_thresh_resized = cv2.resize(roi_thresh, (display_frame.shape[1], display_frame.shape[0]))
+                    else:
+                        roi_thresh_resized = roi_thresh
+
+                    mask_indices = roi_thresh_resized > 0
+                    overlay = display_frame.copy()
+                    overlay[mask_indices] = roi_color
+                    cv2.addWeighted(overlay, alpha, display_frame, 1 - alpha, 0, display_frame)
+            
+            if self.stream_pipeline.get_state(0)[1] != Gst.State.PLAYING:
+                return Gst.FlowReturn.OK
+                
+            gst_buf = Gst.Buffer.new_wrapped(display_frame.tobytes())
+            self.stream_src.emit("push-buffer", gst_buf)
             buf.unmap(mapinfo)
             return Gst.FlowReturn.OK
 
