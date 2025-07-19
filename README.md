@@ -28,7 +28,7 @@ source setup_env.sh
 cd ..
 ```
 
-#### Python interpreter
+### Python interpreter
 
 Before running the project, make sure your IDE (e.g., VSCode or PyCharm) uses the Python interpreter from the virtual environment created during setup.
 Select the following interpreter path:
