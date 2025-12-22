@@ -1,4 +1,4 @@
-from hailo_apps_infra.gstreamer_helper_pipelines import QUEUE, OVERLAY_PIPELINE
+from hailo_apps.python.core.gstreamer.gstreamer_helper_pipelines import QUEUE, OVERLAY_PIPELINE
 def SOURCE_PIPELINE(video_format="RGB", name="app_source"):
     return (
         f"appsrc name={name} is-live=true leaky-type=downstream max-buffers=1 ! "

@@ -5,11 +5,20 @@ gi.require_version("GstApp", "1.0")
 from gi.repository import Gst
 import setproctitle
 import os
-from hailo_apps_infra.hailo_rpi_common import get_default_parser, detect_hailo_arch
-from hailo_apps_infra.gstreamer_helper_pipelines import (
-    INFERENCE_PIPELINE,
-    DISPLAY_PIPELINE,
+from hailo_apps.python.core.common.core import get_default_parser, get_resource_path
+from hailo_apps.python.core.common.defines import (
+    DETECTION_PIPELINE,
+    DETECTION_POSTPROCESS_SO_FILENAME,
+    RESOURCES_SO_DIR_NAME,
 )
+from hailo_apps.python.core.common.installation_utils import detect_hailo_arch
+from hailo_apps.python.core.gstreamer.gstreamer_helper_pipelines import (
+     INFERENCE_PIPELINE,
+     DISPLAY_PIPELINE,
+     OVERLAY_PIPELINE
+)
+from  hailo_apps.python.core.gstreamer.gstreamer_app import GStreamerApp
+
 from arduino_control import move_car_with_flush
 from image_processing import process_frame
 import cv2
@@ -17,10 +26,6 @@ import traceback
 import debugpy
 from server import pipeline_server
 from utilities import get_frame_info
-from hailo_apps_infra.gstreamer_app import GStreamerApp
-from hailo_apps_infra.gstreamer_helper_pipelines import (
-    OVERLAY_PIPELINE
-)
 from source_pipeline import SOURCE_PIPELINE
 
 class CustomGStreamerDetectionApp(GStreamerApp):
@@ -45,8 +50,6 @@ class CustomGStreamerDetectionApp(GStreamerApp):
         args = parser.parse_args()
         super().__init__(parser, user_data)
         self.batch_size = 2
-        self.video_width=800
-        self.video_height=600
         nms_score_threshold = 0.5
         nms_iou_threshold = 0.5
         if args.arch is None:
@@ -68,9 +71,10 @@ class CustomGStreamerDetectionApp(GStreamerApp):
             self.hef_path = os.path.join(
                 self.current_path, "../resources/yolov8s_h8l.hef"
             )
-        self.post_process_so = os.path.join(
-            self.current_path, "../resources/libyolo_hailortpp_postprocess.so"
+        self.post_process_so = get_resource_path(
+                DETECTION_PIPELINE, RESOURCES_SO_DIR_NAME, self.arch, DETECTION_POSTPROCESS_SO_FILENAME
         )
+
         self.options_menu.use_frame = True
         self.source_type="rpi"
         self.labels_json = args.labels_json

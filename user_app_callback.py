@@ -1,10 +1,8 @@
 import serial.tools.list_ports
-import serial.tools.list_ports
 import cv2
 import serial
 import threading
-import threading
-from hailo_apps_infra.hailo_rpi_common import app_callback_class
+from hailo_apps.python.core.gstreamer.gstreamer_app import app_callback_class
 from constants import DIRECTION_STOP
 import time
 from pid import PIDController

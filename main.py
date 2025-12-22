@@ -14,7 +14,7 @@ from image_processing import process_frame
 from constants import MANUAL_MODE
 import hailo
 from utilities import get_frame_info
-from hailo_apps_infra.hailo_rpi_common import get_numpy_from_buffer
+from hailo_apps.python.core.common.buffer_utils import get_numpy_from_buffer
 import time
 import socketio
 sign_sio = socketio.Client()
